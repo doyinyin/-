@@ -1,0 +1,528 @@
+使用源码包安装nginx软件包
+yum -y install gcc pcre-devel openssl-devel        //安装依赖包
+useradd -s /sbin/nologin nginx
+tar  -xf   nginx-1.10.3.tar.gz
+cd  nginx-1.10.3
+./configure   \
+> --prefix=/usr/local/nginx   \                //指定安装路径
+> --user=nginx   \                            //指定用户
+> --group=nginx  \                            //指定组
+> --with-http_ssl_module                        //开启SSL加密功能
+make && make install    //编译并安装
+nginx命令的用法
+/usr/local/nginx/sbin/nginx                    //启动服务
+/usr/local/nginx/sbin/nginx -s stop            //关闭服务
+/usr/local/nginx/sbin/nginx -s reload        //重新加载配置文件
+/usr/local/nginx/sbin/nginx –V                //查看软件信息
+ln -s /usr/local/nginx/sbin/nginx /sbin/        //方便后期使用
+netstat命令可以查看系统中启动的端口信息，该命令常用选项如下：
+-a显示所有端口的信息
+-n以数字格式显示端口号
+-t显示TCP连接的端口
+-u显示UDP连接的端口
+-l显示服务正在监听的端口信息，如httpd启动后，会一直监听80端口
+-p显示监听端口的服务名称是什么（也就是程序名称）
+nginx服务默认通过TCP 80端口监听客户端请求:
+netstat  -anptu  |  grep nginx
+升级Nginx服务器
+./configure    --prefix=/usr/local/nginx   --user=nginx    --group=nginx  --with-http_ssl_module
+make  
+备份老的nginx主程序，并使用编译好的新版本nginx替换老版本
+mv /usr/local/nginx/sbin/nginx  /usr/local/nginx/sbin/nginxold
+cp objs/nginx  /usr/local/nginx/sbin/         //拷贝新版本
+make upgrade                            //升级
+/usr/local/nginx/sbin/nginx –v                //查看版本
+用户认证
+vim  /usr/local/nginx/conf/nginx.conf
+http{
+    server{
+        listen 80;
+        server_name localhost;
+        root html;
+       }
+       server{
+        listen 80;
+        server_name www.xyz.com;
+        root www;
+       }
+}
+修改Nginx配置文件
+server {
+        listen       80;
+        server_name  localhost;
+        auth_basic "Input Password:";                        //认证提示符
+        auth_basic_user_file "/usr/local/nginx/pass";        //认证密码文件
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+  }
+生成密码文件，创建用户及密码
+yum -y install  httpd-tools
+htpasswd -c /usr/local/nginx/pass   tom        //创建密码文件
+New password: 
+Re-type new password: 
+Adding password for user tom
+htpasswd  /usr/local/nginx/pass   jerry      //追加用户，不使用-c选项
+New password: 
+Re-type new password: 
+Adding password for user jerry
+cat /usr/local/nginx/pass
+重启Nginx服务
+客户端测试
+基于域名的虚拟主机
+修改Nginx服务配置，添加相关虚拟主机配置如下
+server {
+        listen       80;                                      //端口
+        server_name  www.a.com;                                //域名
+auth_basic "Input Password:";                        //认证提示符
+        auth_basic_user_file "/usr/local/nginx/pass";        //认证密码文件
+location / {
+            root   html;                                    //指定网站根路径
+            index  index.html index.htm;
+       }
+       
+}
+… …
+    server {
+        listen  80;                                        //端口
+        server_name  www.b.com;                                //域名
+location / { 
+root   www;                                 //指定网站根路径
+index  index.html index.htm;
+}
+}
+创建网站根目录及对应首页文件
+ mkdir /usr/local/nginx/www
+ echo "www" > /usr/local/nginx/www/index.html
+重启nginx服务
+客户端测试
+扩展其他虚拟主机：
+基于端口的虚拟主机（参考模板）
+server {
+        listen       8080;              //端口
+        server_name  web1.example.com;          //域名
+        ......
+}
+基于IP的虚拟主机
+server {
+        listen       192.168.0.1:80;          //端口
+        server_name  web1.example.com;          //域名
+  ... ...
+}
+SSL虚拟主机
+加密算法一般分为对称算法、非对称算法、信息摘要。
+对称算法有：AES、DES，主要应用在单机数据加密。
+非对称算法有：RSA、DSA，主要应用在网络数据加密。
+信息摘要：MD5、sha256，主要应用在数据完整性校验、数据秒传等。
+生成私钥与证书
+cd /usr/local/nginx/conf
+openssl genrsa > cert.key                            //生成私钥
+openssl req -new -x509 -key cert.key > cert.pem      //生成证书
+修改Nginx配置文件，设置加密网站的虚拟主机
+server {
+        listen       443 ssl;
+        server_name            www.c.com;
+        ssl_certificate      cert.pem;         #这里是证书文件
+        ssl_certificate_key  cert.key;         #这里是私钥文件
+        ssl_session_cache    shared:SSL:1m;
+        ssl_session_timeout  5m;
+        ssl_ciphers  HIGH:!aNULL:!MD5;
+        ssl_prefer_server_ciphers  on;
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+    }
+重启nginx服务
+客户端验证
+#######################################################3
+部署LNMP环境
+使用yum安装基础依赖包
+ yum -y install gcc openssl-devel pcre-devel zlib-devel
+源码安装Nginx
+安装MariaDB,php和php-fpm
+启动服务
+systemctl stop httpd                //如果该服务存在则关闭该服务
+/usr/local/nginx/sbin/nginx             //启动Nginx服务
+netstat -utnlp | grep :80
+tcp    0    0 0.0.0.0:80        0.0.0.0:*        LISTEN        32428/nginx         
+启动MySQL服务
+启动PHP-FPM服务
+设置防火墙与SELinux
+构建LNMP平台
+php-fpm配置文件
+vim /etc/php-fpm.d/www.conf
+[www]
+listen = 127.0.0.1:9000            //PHP端口号
+pm.max_children = 32                //最大进程数量
+pm.start_servers = 15                //最小进程数量
+pm.min_spare_servers = 5            //最少需要几个空闲着的进程
+pm.max_spare_servers = 32            //最多允许几个进程处于空闲状态
+修改Nginx配置文件并启动服务
+vim /usr/local/nginx/conf/nginx.conf
+location / {
+            root   html;
+            index  index.php  index.html   index.htm;
+#设置默认首页为index.php，当用户在浏览器地址栏中只写域名或IP，不说访问什么页面时，服务器会把默认首页index.php返回给用户
+        }
+ location  ~  \.php$  {
+            root           html;
+            fastcgi_pass   127.0.0.1:9000;    #将请求转发给本机9000端口，PHP解释器
+            fastcgi_index  index.php;
+            #fastcgi_param   SCRIPT_FILENAME  $document_root$fastcgi_script_name;
+            include        fastcgi.conf;
+        }
+重起服务
+创建PHP页面，测试LNMP架构能否解析PHP页面
+创建PHP测试页面,连接并查询MariaDB数据库
+客户端使用浏览器访问服务器PHP首页文档，检验是否成功：
+LNMP常见问题
+Nginx的默认访问日志文件为/usr/local/nginx/logs/access.log
+Nginx的默认错误日志文件为/usr/local/nginx/logs/error.log
+PHP默认错误日志文件为/var/log/php-fpm/www-error.log
+如果动态网站访问失败，可用参考错误日志，查找错误信息
+地址重写
+修改Nginx服务配置：
+server {
+        listen       80;
+        server_name  localhost;
+location / {
+    root   html;
+index  index.html index.htm;
+rewrite /a.html  /b.html;            
+}
+}
+重新加载配置文件
+/usr/local/nginx/sbin/nginx  -s  reload
+客户端测试
+访问a.html重定向到b.html（跳转地址栏）
+修改Nginx服务配置：
+server {
+        listen       80;
+        server_name  localhost;
+location / {
+    root   html;
+index  index.html index.htm;
+rewrite /a.html  /b.html  redirect;            
+}
+}
+重新加载配置文件
+/usr/local/nginx/sbin/nginx  -s  reload
+客户端测试
+修改配置文件(访问192.168.4.5的请求重定向至www.tmooc.cn)
+修改Nginx服务配置
+server {
+        listen       80;
+        server_name  localhost;
+rewrite ^/ http://www.tmooc.cn/;
+location / {
+    root   html;
+index  index.html index.htm;
+# rewrite /a.html  /b.html  redirect;
+}
+}
+重新加载配置文件
+客户端测试
+修改配置文件(访问192.168.4.5/下面子页面，重定向至www.tmooc.cn/下相同的页面)
+修改Nginx服务配置
+server {
+        listen       80;
+        server_name  localhost;
+rewrite ^/(.*)$ http://www.tmooc.cn/$1;
+location / {
+    root   html;
+index  index.html index.htm;
+# rewrite /a.html  /b.html  redirect;
+}
+}
+重新加载配置文件
+/usr/local/nginx/sbin/nginx  -s  reload
+客户端测试
+修改配置文件(实现curl和火狐访问相同链接返回的页面不同)
+创建网页目录以及对应的页面文件：
+echo "I am Normal page" > /usr/local/nginx/html/test.html
+mkdir  -p  /usr/local/nginx/html/firefox/
+echo "firefox page" > /usr/local/nginx/html/firefox/test.html
+修改Nginx服务配置
+server {
+        listen       80;
+        server_name  localhost;
+location / {
+    root   html;
+index  index.html index.htm;
+}
+#这里，~符号代表正则匹配，*符号代表不区分大小写
+if ($http_user_agent ~* firefox) {            //识别客户端firefox浏览器
+rewrite ^(.*)$ /firefox/$1;
+}
+}
+重新加载配置文件
+客户端测试
+地址重写格式【总结】
+rewrite 旧地址 新地址 [选项];
+last 不再读其他rewrite
+break 不再读其他语句，结束请求
+redirect 临时重定向
+permament 永久重定向
+
+Nginx反向代理
+部署实施后端Web服务器
+yum  -y  install  httpd
+echo "192.168.2.100" > /var/www/html/index.html
+systemctl restart httpd
+firewall-cmd --set-default-zone=trusted
+setenforce 0
+配置Nginx服务器，添加服务器池，实现反向代理功能
+http {
+.. ..
+#使用upstream定义后端服务器集群，集群名称任意(如webserver)
+#使用server定义集群中的具体服务器和端口
+upstream webserver {
+                server 192.168.2.100:80;
+                server 192.168.2.200:80;
+        }
+.. ..
+server {
+        listen        80;
+        server_name  localhost;
+            location / {
+#通过proxy_pass将用户的请求转发给webserver集群
+            proxy_pass http://webserver;
+        }
+}
+重启nginx服务
+/usr/local/nginx/sbin/nginx -s reload
+客户端使用浏览器访问代理服务器测试轮询效果
+配置upstream服务器集群池属性
+http {
+.. ..
+upstream webserver {
+                server 192.168.2.100 weight=1 max_fails=1 fail_timeout=30;
+                server 192.168.2.200 weight=2 max_fails=2 fail_timeout=30;
+                server 192.168.2.101 down;
+        }
+#weight设置服务器权重值，默认值为1
+#max_fails设置最大失败次数
+#fail_timeout设置失败超时时间，单位为秒
+#down标记服务器已关机，不参与集群调度
+.. ..
+server {
+        listen        80;
+        server_name  localhost;
+            location / {
+            proxy_pass http://webserver;
+        }
+}
+重启nginx服务
+关闭一台后端服务器，客户端使用浏览器访问代理服务器测试轮询效果，再次启动后端服务器的httpd，客户端再次使用浏览器访问代理服务器测试轮询效果
+配置upstream服务器集群的调度算法
+upstream webserver {
+#通过ip_hash设置调度规则为：相同客户端访问相同服务器
+                 ip_hash;
+                server 192.168.2.100 weight=1 max_fails=2 fail_timeout=10;
+                server 192.168.2.200 weight=2 max_fails=2 fail_timeout=10;
+        }
+重启nginx服务
+客户端使用浏览器访问代理服务器测试轮询效果
+Nginx的TCP/UDP调度器
+部署支持4层TCP/UDP代理的Nginx服务器
+部署nginx服务器
+编译安装必须要使用--with-stream参数开启4层代理模块。
+yum –y install gcc pcre-devel openssl-devel        //安装依赖包
+tar  -xf   nginx-1.12.2.tar.gz
+cd  nginx-1.12.2
+[root@proxy nginx-1.12.2]# ./configure   \
+> --with-http_ssl_module                                //开启SSL加密功能
+> --with-stream                                       //开启4层反向代理功能
+make && make install           //编译并安装
+配置Nginx服务器，添加服务器池，实现TCP/UDP反向代理功能
+修改/usr/local/nginx/conf/nginx.conf配置文件
+stream {
+            upstream backend {
+               server 192.168.2.100:22;            //后端SSH服务器的IP和端口
+               server 192.168.2.200:22;
+}
+            server {
+                listen 12345;                    //Nginx监听的端口
+                proxy_connect_timeout 1s;
+                proxy_timeout 3s;
+                 proxy_pass backend;
+             }
+}
+重启nginx服务
+客户端使用访问代理服务器测试轮询效果
+#####################################################
+Nginx常见问题处理
+ss命令可以查看系统中启动的端口信息，该命令常用选项如下：
+-a显示所有端口的信息
+-n以数字格式显示端口号
+-t显示TCP连接的端口
+-u显示UDP连接的端口
+-l显示服务正在监听的端口信息，如httpd启动后，会一直监听80端口
+-p显示监听端口的服务名称是什么（也就是程序名称）
+注意：在RHEL7系统中可以使用ss命令替代netstat命令，功能一样，选项一样。
+netstat  -anptu  |  grep nginx
+ss  -anptu  |  grep nginx
+优化Nginx并发量
+优化前使用ab高并发测试
+ ab -n 2000 -c 2000 http://192.168.4.5/
+修改Nginx配置文件，增加并发量
+.. ..
+worker_processes  2;                    //与CPU核心数量一致
+events {
+worker_connections 65535;        //每个worker最大并发连接数
+use epoll;
+}
+.. ..
+nginx -s reload
+优化Linux内核参数（最大文件数量）
+ulimit -a                        //查看所有属性值
+ulimit -Hn 100000                //设置硬限制（临时规则）
+ulimit -Sn 100000                //设置软限制（临时规则）
+vim /etc/security/limits.conf
+    .. ..
+*               soft    nofile            100000
+*               hard    nofile            100000
+优化后测试服务器并发量
+ab -n 2000 -c 2000 http://192.168.4.5/
+优化Nginx数据包头缓存
+优化前，使用脚本测试长头部请求是否能获得响应
+修改Nginx配置文件，增加数据包头部缓存大小
+http {
+client_header_buffer_size    1k;        //默认请求包头信息的缓存    
+large_client_header_buffers  4 4k;        //大请求包头部信息的缓存个数与容量
+.. ..
+}
+重起服务
+优化后，使用脚本测试长头部请求是否能获得响应
+浏览器本地缓存静态数据
+修改Nginx配置文件，定义对静态页面的缓存时间
+server {
+        listen       80;
+        server_name  localhost;
+        location / {
+            root   html;
+            index  index.html index.htm;
+        }
+location ~* \.(jpg|jpeg|gif|png|css|js|ico|xml)$ {
+expires        30d;            //定义客户端缓存时间为30天
+}
+}
+cp /usr/share/backgrounds/day.jpg /usr/local/nginx/htm
+重起服务
+优化后，使用Firefox浏览器访问图片，再次查看缓存信息
+自定义报错页面
+修改Nginx配置文件，自定义报错页面
+error_page   404  /40x.html;    //自定义错误页面
+
+vim /usr/local/nginx/html/40x.html        //生成错误页面
+Oops,No NO no page …
+ 
+重起服务
+优化后，客户端使用浏览器访问不存在的页面，会提示自己定义的40x.html页面
+常见http状态码
+
+如何查看服务器状态信息
+编译安装时使用--with-http_stub_status_module开启状态页面模块
+修改Nginx配置文件，定义状态页面
+location /status {
+                stub_status on;
+        }
+启动服务
+优化后，查看状态页面信息
+Active connections：当前活动的连接数量。
+Accepts：已经接受客户端的连接总数量。
+Handled：已经处理客户端的连接总数量（一般与accepts一致，除非服务器限制了连接数量）。
+Requests：客户端发送的请求数量。
+Reading：当前服务器正在读取客户端请求头的数量。
+Writing：当前服务器正在写响应信息的数量。
+Waiting：当前多少客户端在等待服务器的响应。
+对页面进行压缩处理
+修改Nginx配置文件
+http {
+.. ..
+gzip on;                            //开启压缩
+gzip_min_length 1000;                //小文件不压缩
+gzip_comp_level 4;                //压缩比率
+gzip_types text/plain text/css application/json application/x-javascript text/xml application/xml application/xml+rss text/javascript;
+                                    //对特定文件压缩，类型参考mime.types
+.. ..
+}
+服务器内存缓存
+如果需要处理大量静态文件，可以将文件缓存在内存，下次访问会更快。
+http { 
+open_file_cache          max=2000  inactive=20s;
+        open_file_cache_valid    60s;
+        open_file_cache_min_uses 5;
+        open_file_cache_errors   off;
+//设置服务器最大缓存2000个文件句柄，关闭20秒内无请求的文件句柄
+//文件句柄的有效时间是60秒，60秒后过期
+//只有访问次数超过5次会被缓存
+web bench 安装与使用
+    Webbench是一个在linux下使用的非常简单的网站压测工具。它使用fork()模拟多个客户端同时访问我们设定的URL，测试网站在压力下工作的性能，最多可以模拟3万个并发连接去测试网站的负载能力
+    安装依赖包：yum install ctags
+    make
+    使用
+    ./webbench -r -t 60 -c 200 -2 http://url
+    -r 发送刷新缓存要求
+    -t 测试时间
+    -c 并发数量
+    -2 使用 http1.1，长连接
+    -h 帮助信息
+    wrk 压力测试软件
+    优势是支持线程，能更好的发挥多核的优势
+    安装也很简单，直接 make 即可
+    -c  表示的是并发
+    -d  测试持续的时间
+    -t  来控制线程数（缺省值为 2）
+    /wrk -c 200 -d 10 -t 5 http://url
+NGINX 特证
+1、相比 Apache，用 Nginx 作为 Web 服务器：使用资源更少，支持更多并发连接，效率更高。
+2、作为负载均衡服务器：Nginx 既可在内部直接支持 Rails 和 PHP，也可支持作为 HTTP 代理服务器对外进行服务。Nginx 用 C 编写而成， 不论是系统资源开销还是 CPU 使用效率都比 Perlbal 要好的多。
+3、作为邮件代理服务器：Nginx 同时也是一款非常优秀的邮件代理服务器（最早开发这个产品的目的之一，是作为邮件代理服务器）。
+4、反向代理可以根据url将请求转向于不同用途的集群，比如图片请求，转向图片服务器集群；视频请求，转身视频服务器集群。
+nginx是一款轻量级的web服务器/反向代理服务器/电子邮件代理服务器，安装非常简单，配置文件也很简洁（还支持 perl 语法）。Nginx 支持平滑加载新配置，还能够在不间断服务的情况下进行软件版本升级。
+Apache 特性
+1、Apache 是 LAMP 架构最核心的 Web Server，开源、稳定、模块丰富是 Apache 的优势。但 Apache 的缺点是有些臃肿，内存和 CPU 开销大，性能上有损耗，不如一些轻量级的 Web 服务器（譬如：Nginx、Tengine等）高效，轻量级的 Web 服务器对于静态文件的响应能力来说远高于 Apache 服务器。
+2、Apache 做为 Web Server 是负载 PHP 的最佳选择，如果流量很大的话，可以采用 Nginx 来负载非 PHP 的 Web 请求。Nginx 是一个高性能的 HTTP 和反向代理服务器，Nginx 以其稳定、丰富功能集、示例配置文件和低系统资源的消耗而闻名。Nginx 现能支持 PHP 和 FastCGI，也支持负载均衡和容错，可和 Apache 配合使用，是轻量级的 HTTP 服务器的首选。
+3、Web 服务器缓存也有多种方案，Apache 提供了自己的缓存模块，也可以使用外加的 Squid 模块进行缓存，这两种方式均可有效提高 Apache 的访问响应能力。Squid Cache 是一个 Web 缓存服务器，支持高效缓存，可作为网页服务器的前置 cache 服务器缓存相关请求以提高 Web 服务器速度。把 Squid 放在 Apache 的前端来缓存 Web 服务器生成动态内容，而 Web 应用程序只需要适当地设置页面实效时间即可。如访问量巨大，则可考虑使用 memcache 作为分布式缓存。
+4、PHP 的加速可使用 eAccelerator 加速器，eAccelerator 是一个自由开放源码的 PHP 加速器。它会优化动态内容缓存，提高 PHP 脚本缓存性能，使 PHP 脚本在编译状态下，对服务器的开销几乎完全消除。它还可对脚本起优化作用，以加快其执行效率。 使 PHP 程序代码执效率可提高 1-10 倍。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,887 @@
+主从同步
+构建主从同步
+主master库配置
+启动binlog日志文件
+用户授权：给从库添加连接时使用的用户名
+show processlist;   //查看正在运行的程序
+查看正在使用的binlog日志信息
+vim /etc/my.cnf
+[mysqld]
+server_id=51
+log-bin=master51
+binlog_format="mixed"
+:wq
+systemctl restart mysqld
+用户授权
+ grant replication slave  on *.* to  repluser@"%"  identified by "123456";
+查看正在使用的binlog日志信息
+ show master status;
+从slave库配置
+指定server_id 
+测试授权用户
+管理本机登录指定主库信息
+查看配置
+客户端连接主库存储数据，在从库本机也能够看到。
+mysql -uroot -p123456
+ show slave  status;    //查看从库信息
+vim /etc/my.cnf
+ [mysqld]
+server_id=52
+:wq
+systemctl restart  mysqld
+mysqlbinlog    host50-bin.000001 //查看日志信息
+mysql  -uroot  -p123456
+change master to master_host="192.168.4.51",master_user="repluser",master_password="123456",
+master_log_file="master51.000001"(当前日志),master_log_pos=主机偏移量;
+start  slave;
+在主库上授权访问gamedb库的用户
+create  database  库名;
+grant  all  on  gamedb.*   to   dada@"%"  identified by  "123456";
+测试
+mysql -h192.168.4.51   -udada -p123456;
+ show   grants;
+master.info 连接主服务器信息
+relay-log.info 中继日志信息
+主机名 -relay-bin.xxxxxx 中继日志
+主机名 -relay-bin.index 中继日志索引文件
+stop  slave;    暂时不同步主库的数据
+rm -rf master.info  relay-log.info   host52-relay-bin.*
+systemctl  restart  mysqld
+还原成独立的数据库服务器
+主从同步结构模式介绍
+• 基本应用
+– 单向复制:主 --> 从
+• 扩展应用
+– 链式复制:主 --> 从 --> 从
+– 双向复制:主 <--> 从
+– 放射式复制:从 <-- 主 --> 从
+主从从
+A为主 B为A的从为C的主 C为B的从
+B:[mysqld]
+  server_id=52
+  log-bin=master52
+  binlog_format="mixed"
+  log_slave_updates
+主主（互为主从）
+ 复制模式介绍
+• 异步复制( Asynchronous replication )
+– 主库在执行完客户端提交的事务后会立即将结果返给
+客户端,并不关心从库是否已经接收并处理。
+• 全同步复制( Fully synchronous replication )
+– 当主库执行完一个事务,所有的从库都执行了该事务
+才返回给客户端。
+• 半同步复制( Semisynchronous replication )
+– 介于异步复制和全同步复制之间,主库在执行完客户
+端提交的事务后不是立刻返回给客户端,而是等待至少一个从库接收到并写到 relay log 中才返回给客户端。                    
+show variables like "have _ dynamic _ loading";
+主从同步原理
+• Master ,记录数据更改操作
+– 启用 binlog 日志
+– 设置 binlog 日志格式
+– 设置 server_id
+• Slave 运行 2 个线程
+– Slave_IO :复制 master 主机 binlog 日志文件里的 SQL 到本机的 relay-log 文件里。
+– Slave_SQL :执行本机 relay-log 文件里的 SQL 语句,重现 Master 的数据操作。
+看是否允许动态加载模块
+show variables like "have _ dynamic _ loading";
+复制模式介绍
+• 异步复制( Asynchronous replication )
+– 主库在执行完客户端提交的事务后会立即将结果返给
+客户端,并不关心从库是否已经接收并处理。
+• 全同步复制( Fully synchronous replication )
+– 当主库执行完一个事务,所有的从库都执行了该事务
+才返回给客户端。
+• 半同步复制( Semisynchronous replication )
+– 介于异步复制和全同步复制之间,主库在执行完客户
+端提交的事务后不是立刻返回给客户端,而是等待至
+少一个从库接收到并写到 relay log 中才返回给客户端
+– 用户需有 SUPER 权限
+主库: mysql> INSTALL PLUGIN rpl _ semi _ sync _ master SONAME 'semisync_master.so';
+从库: mysql> INSTALL PLUGIN rpl _ semi _ sync _ slave SONAME 'semisync_slave.so';
+查看: mysql> SELECT PLUGIN_NAME, PLUGIN_STATUS FROMINFORMATION_SCHEMA.PLUGINS WHERE PLUGIN_NAME LIKE '%semi%';
+• 启用半同步复制
+– 在安装完插件后,半同步复制默认是关闭的
+主: mysql> SET GLOBAL rpl_semi_sync_master_enabled = 1;
+从: mysql> SET GLOBAL rpl_semi_sync_slave_enabled = 1;
+查看: mysql> show variables like "rpl_semi_sync_ %_enabled";
+• 配置文件永久启用半同步复制
+– 命令配置临时配置,重启服务会失效
+– 修改后需要重启服务
+– 写在主配置文件 /etc/my.cnf 的 [mysqld] 下方
+主: plugin-load=rpl_semi_sync_master=semisync_master.so
+rpl_semi_sync_master_enabled=1
+从: plugin-load=rpl_semi_sync_slave=semisync_slave.so
+rpl_semi_sync_slave_enabled=1
+• 在有的高可用架构下, master 和 slave 需同时启动
+– 以便在切换后能继续使用半同步复制
+plugin-load="rpl_semi_sync_master=semisync_master.so;rpl_semi_sync_slave=semis
+ync_slave.so“
+rpl-semi-sync-master-enabled = 1
+rpl-semi-sync-slave-enabled = 1
+主库配置选项
+binlog_do_db=name 设置 Master 对哪些库记日志
+binlog_ignore_db=name 设置 Master 对哪些库不记日志
+从库配置选项
+• 适用于 Slave 服务器
+log_slave_updates
+记录从库更新,允许链式复制( A-B-C )
+relay_log=dbsvr2-relay-bin 
+指定中继日志文件名
+replicate_do_db=mysql
+仅复制指定库,其他库将被忽略,此选项可设置多条(省略时复制所有库)
+replicate_ignore_db=test 
+不复制哪些库,其他库将被忽略, ignore-db 与 do-db 只需选用其中一种
+#######################################333
+MySQL 读写分离
+读写分离的原理
+• 多台 MySQL 服务器
+– 分别提供读、写服务,均衡流量
+– 通过主从复制保持数据一致性
+• 由 MySQL 代理面向客户端
+– 收到 SQL 写请求时,交给服务器 A 处理
+– 收到 SQL 读请求时,交给服务器 B 处理
+– 具体区分策略由服务设置
+构建读写分离
+1. 已搭建好 MySQL 主从复制
+2. 添加一台 MySQL 代理服务器
+3. 客户端通过代理主机访问 MySQL 数据库
+部署 MySQL 代理
+• 安装 maxscale
+– MaxScale 是 Mysql 的兄弟公司 MariaDB 开发的
+– 下载地址 https://downloads.mariadb.com/files/MaxScale
+– 主配置文件 /etc/maxscale.cnf
+rpm -ivh maxscale-2.1.2-1.rhel.7.x86_64.rpm
+部署 MySQL 代理
+• 修改配置文件
+cp /etc/maxscale.cnf   /etc/maxscale.cnf.bak
+vim   /etc/maxscale.cnf
+[maxscale]
+threads=1
+[server1]
+type=server
+address=192.168.4.51
+port=3306
+protocol=MySQLBackend
+[server2]
+type=server
+address=192.168.4.52
+port=3306
+protocol=MySQLBackend
+[MySQL Monitor]
+type=monitor
+module=mysqlmon
+servers=server1,  server2
+user=scalemon
+passwd=123456
+monitor_interval=10000
+ #[Read-Only Service]
+ #type=service
+ #router=readconnroute
+ #servers=server1, server2
+ #user=maxscale
+ #passwd=123456
+ #router_options=slave
+[Read-Write Service]
+type=service
+router=readwritesplit
+servers=server1, server2
+user=maxscale
+passwd=123456
+max_slave_connections=100%
+[MaxAdmin Service]
+type=service
+router=cli
+[Read-Write Listener]
+type=listener
+service=Read-Write Service
+protocol=MySQLClient
+port=4006
+[MaxAdmin Listener]
+type=listener
+service=MaxAdmin Service
+protocol=maxscaled
+socket=default
+port=4018
+• 在主、从数据库服务器创建授权用户
+mysql> grant replication slave, replication client on *.* to scalemon@'%' identified by “111111”; // 创建监控用户
+mysql> grant select on mysql.* to maxscale@'%' identified by “111111”; // 创建路由用户
+mysql> grant all on *.* to student@'%' identified by “111111”; // 创建访问数据用户
+• 主要命令:
+– 启动服务
+maxscale  -f  /etc/maxscale.cnf
+– 查看端口
+netstat -utnlp  | grep :4006
+– 停止服务
+ps -C maxscale
+pkill -9 19081
+客户端访问测试
+• 连接 MySQL 代理服务器
+– mysql -h 代理的 IP 地址 -P 端口 -u 用户名 -p 密码
+• 在代理本机连接管理端口
+– maxadmin -uadmin -pmariadb -P 端口
+• 测试 SQL 查询、更新操作
+– 可成功查询表记录
+– 可成功写入数据
+• 登录 MySQL 代理
+mysql -h192.168.4.100 -P4006 -ustudent -p111111
+MySQL [(none)]> select @@hostname; // 查看当前访问的主机名
+多实例
+• 什么是多实例
+– 在一台物理主机上运行多个数据库服务
+• 为什么要使用多实例
+– 节约运维成本   – 提高硬件利用率
+安装支持多实例服务的软件包
+tar -zxvf mysql-5.7.20-linux-glibc2.12-x86_64.tar.gz
+mv mysql-5.7.20-linux-glibc2.12-x86_64 /usr/local/mysql
+tail -1 /etc/profile
+    export PATH=/usr/local/mysql/bin:$PATH
+source /etc/profile
+• 主配置文件 /etc/my.cnf
+– 每个实例要有独立的数据库目录和监听端口号
+– 每个实例要有独立的实例名称和独立的 sock 文件
+[mysqld_multi] // 启用多实例
+mysqld = /usr/local/mysql/bin/mysqld_safe // 指定进程文件的路径
+mysqladmin = /usr/local/mysql/bin/mysqladmin // 指定管理命令路径
+user = root // 指定调用进程的用户
+[mysqlX] // 实例进程名称 ,X 表示实例名称 , 如 [mysql2]
+port = 3307 // 端口号
+datadir = /data3307 // 数据库目录 ,要手动创建
+socket =/data3307/mysql.sock // 指定 sock 文件的路径和名称
+pid-file = /data3307/mysqld.pid // 进程 pid 号文件位置
+log-error = /data3307/mysqld.err // 错误日志位置
+:wq
+mdkir  /data3307   /data3308
+• 初始化授权库:
+– 会提示 root 用户登录的初始化密码
+• 启动实例进程
+• 停止实例进程
+./mysqld --user=mysql --basedir= 软件安装目录 --datadir= 数据库目录 –initialize // 初始化授权库
+ mysqld_multi start 实例编号 // 启动实例进程
+[root@localhost bin]# ./mysqld_multi --user=root --password=密码 stop 实例编号 // 停止实例进程
+客户端访问
+• 本机连接
+– 使用初始密码连接
+– 修改本机登陆密码
+– 连接实例
+mysql -uroot –p 初始密码 -S sock 文件
+mysql> alter user user() identified by “ 新密码 ";
+#############################################
+MySQL 性能调优
+• 提高 MySQL 系统的性能、响应速度
+– 替换有问题的硬件( CPU/ 磁盘 / 内存等)
+– 服务程序的运行参数调整
+– 对 SQL 查询进行优化
+mysql服务体系结构
+管理工具：软件安装后,提供的管理命令
+连接池：检查服务器是否有资源响应客户端的连接请求
+sql接口：把sql命令传递给mysql程序
+分析器：检查用户执行的sql命令是否正确
+优化器：对执行的sql命令做优化
+查询缓存：储存曾经查找到的查询结果(储存空间是mysql服务启动时从主机的物理内存里划分出来)
+储存引擎：表的处理器,不同的储存引擎支持不同的功能和数据储存方式
+文件系统：数据服务用来储存数据的硬盘
+并发及连接控制
+• 连接数、连接超时
+max_connections   允许的最大并发连接数
+connect_timeout   等待建立连接的超时秒数,默认 10 秒,只在登录时有效
+wait_timeout      等待关闭连接的不活动超时秒数,默认 28800 秒( 8 小时)
+• 查看当前已使用的连接数  
+show global status like "max_used_connections";
+• 查看默认的最大连接数
+show  variables  like  "max_connectios"
+缓存参数控制
+• 缓冲区、线程数量、开表数量
+key_buffer-size   用于 MyISAM 引擎的关键索引缓存大小
+sort_buffer_size  为每个要排序的线程分配此大小的缓存空间
+read_buffer_size  为顺序读取表记录保留的缓存大小
+thread_cache_size 允许保存在缓存中被重用的线程数量
+table_open_cache  为所有线程缓存的打开的表的数量
+• key_buffer_size=8M
+– 当 Key_reads / Key_read_requests 较低时
+– 可适当加大此缓存值
+show  global status like "key_read%";
+show  variables   like "key_buffer_size";
+• sort_buffer_size=256K
+– 增大此值可提高 ORDER 和 GROUP 的速度
+show variables like "sort_buffer_size";
+• 查看表记录读取缓存
+– 此缓存值影响 SQL 查询的响应速度
+show  variables like "read_%_size";
+• 查看可重用线程数
+show variables   like  "thread_%_size";
+• 查看当前的线程重用状态
+show global  status like "threads_%";
+• 查看已打开、打开过多少个表
+show  global  status like "open%tables";
+• 查看可缓存多少个打开的表
+show variables like "table_open_cache";
+SQL 查询优化
+• 常用日志种类及选项
+错误日志    记录启动 / 运行 / 停止过程中的错误消息   log-error[=name]
+查询日志    记录客户端连接和查询操作    general-log general-log-file=
+慢查询日志  记录耗时较长或不使用索引的查询操作 slow-query-log slow-query-log-file=
+long-query-time=
+• 记录慢查询
+slow-query-log    启用慢查询 
+slow-query-log-file    指定慢查询日志文件
+long-query-time      超过指定秒数(默认 10秒)的查询才被记录
+log-queries-not-using-indexes    记录未使用索引的查询
+• 调整服务配置
+vim /etc/my.cnf
+ [mysqld]
+  .. ..
+  slow_query_log=1
+  slow_query_log_file=mysql-slow.log
+  long_query_time=5
+  log_queries_not_using_indexes=1
+service mysql restart
+• 查看慢查询日志
+– 使用 mysqldumpslow 工具
+mysqldumpslow /var/lib/mysql/mysql-slow.log
+• 查看缓存的大小
+show  variables like  "query_cache%";
+• 查看当前的查询缓存统计
+show global status like "qcache%";
+############################################################33
+MHA 集群
+MHA 简介
+• MHA ( Master High Availability )
+– 由日本 DeNA 公司 youshimaton (现就职于 Facebook 公司)开发
+– 是一套优秀的作为 MySQL 高可用性环境下故障切换和
+主从提升的高可用软件。
+– 目前在 MySQL 高可用方面是一个相对成熟的解决方案。
+– 在 MySQL 故障切换过程中, MHA 能做到在 0~30 秒
+之内自动完成数据库的故障切换操作
+– 并且在进行故障切换的过程中, MHA 能在最大程度上
+保证数据的一致性,以达到真正意义上的高可用。
+• MHA Manager (管理节点)
+– 可以单独部署在一台独立的机器上管理多个 master-sl
+ave 集群,也可以部署在一台 slave 节点上。
+• MHA Node (数据节点)
+– 运行在每台 MySQL 服务器上。
+• MHA Manager 会定时探测集群中的 master 节点,
+当 master 出现故障时,它可以自动将最新数据的 slave 提升为新的 master ,然后将所有其它的 slave
+重新指向新的 master 。整个故障转移过程对应用程序完全透明。
+– ( 1 )从宕机崩溃的 master 保存二进制日志事件( binlog events)
+– ( 2 )识别含有最新更新的 slave
+– ( 3 )应用差异的中继日志( relay log )到其他的 slave
+– ( 4 )应用从 master 保存的二进制日志事件( binlog events )
+– ( 5 )提升一个 slave 为新的 master ;
+– ( 6 )使其他的 slave 连接新的 master 进行复制;
+部署 MHA 集群
+安装软件包
+ls perl-*.rpm
+yum -y  install  perl-*.rpm
+perl-Config-Tiny-2.14-7.el7.noarch.rpm
+perl-Mail-Sender-0.8.23-1.el7.noarch.rpm
+perl-MIME-Types-1.38-2.el7.noarch.rpm
+perl-Email-Date-Format-1.002-15.el7.noarch.rpm
+perl-Mail-Sendmail-0.79-21.el7.art.noarch.rpm
+perl-Parallel-ForkManager-1.18-2.el7.noarch.rpm
+perl-Log-Dispatch-2.41-1.el7.1.noarch.rpm
+perl-MIME-Lite-3.030-1.el7.noarch.rpm
+mysql> grant all on *.* to 'root'@'%' identified by
+'123456'; // 在所有数据节点上授权监控用户
+• 在所有数据库服务器上安装 mha-node 包
+]# yum -y install perl-DBD-mysql perl-DBI
+]# rpm -ivh mha4mysql-node-0.56-0.el6.noarch.rpm
+• 在管理主机56上安装 mha_node 和 mha-manager包
+]# yum -y install perl-DBD-mysql perl-DBI
+]# rpm -ivh mha4mysql-node-0.56-0.el6.noarch.rpm
+]# yum -y install perl-ExtUtils-* perl-CPAN-*
+]#tar -zxf mha4mysql-manager-0.56.tar.gz
+]#cd mha4mysql-manager-0.56
+]# perl Makefile.pl
+]# make &&  make install
+配置 ssh 密钥对认证登陆
+• 所有数据库服务器彼此之间互相以 root 用户 ssh 秘
+钥对认证登录
+• 配置管理主机以 root 用户 ssh 秘钥对认证登录
+所有数据节点主机
+ssh-key-gen
+ssh-copy-id root@192.168.4.X
+安装 manager 软件包 后产生的命令
+masterha_check_ssh      检查 MHA 的 SSH 配置状况
+masterha_check_repl     检查 MySQL 复制状况
+masterha_manger         启动 MHA
+masterha_check_status   检测 MHA 运行状态
+masterha_master_monitor 检测 master 是否宕机
+配置 master 数据库服务器
+]vim /etc/my.cnf
+[mysqld]
+plugin-load="rpl_semi_sync_master=semisync_master.so;rpl_semi_sync_slave=semisyn
+c_slave.so"
+rpl-semi-sync-master-enabled = 1
+rpl-semi-sync-slave-enabled = 1
+server_id=51
+log-bin=master51
+binlog-format="mixed"
+:wq
+]# systemctl  restart mysqld
+添加主从同步授权用户
+mysql> set global relay_log_purge=off;// 不自动删除本机的中继日志文件
+mysql> grant replication slave on *.* to repluser@"%" identified by
+"123456";
+配置备用 2 master 数据库服务器
+mysql> set global relay_log_purge=off
+# vim /etc/my.cnf
+[mysqld]
+plugin-load =
+"rpl_semi_sync_master=semisync_master.so;rpl_semi_sync_slave=
+semisync_slave.so
+rpl-semi-sync-master-enabled = 1
+rpl-semi-sync-slave-enabled = 1
+server_id=52
+log-bin=master52
+binlog-format="mixed"
+:wq
+]# systemctl  restart mysqld
+mysql> set global relay_log_purge=off
+mysql>change master to master_host="192.168.4.51",master_user="repluser",master_password="1234546",master_log_file="master51.000001",master_log_pos=441;
+mysql> start slave;
+配置 2 台 slave 服务器
+vim /etc/my.cnf
+[mysqld]
+server_id=IP地址主位
+: wq
+]# systemctl  restart mysqld
+mysql>change master to master_host="192.168.4.51",master_user="repluser",master_password="123456",master_log_file="master51.000001",master_log_pos=441;
+mysql>start slave;
+配置管理主机
+]# cp mha4mysql-manager-0.56/bin/* /usr/local/bin/
+]#mkdir /etc/mha_manager/
+[root@host114 mha4mysql-manager-0.56]# cp
+samples/conf/app1.cnf /etc/mha_manager/
+]# vim /etc/mha_manager/app1.cnf
+[server default]
+manager_workdir=/etc/mha_manager
+manager_log=/etc/mha_manager/manager.log
+master_ip_failover_script=/usr/local/bin/master_ip_failover // 自动
+failover 时候的切换脚本
+ssh_user=root
+ssh_port=22
+repl_user=repluser // 主从同步用户名
+repl_password=123456 // 主从同步密码
+user=root // 连接数据库服务器用户名
+password=123456 // 密码
+[server1]
+hostname=192.168.4.51
+port=3306
+[server2]
+hostname=192.168.4.52
+port=3306
+candidate_master=1 // 设置为候选 master
+[server4]
+hostname=192.168.4.54
+port=3306
+no_master=1 // 不竞选 master
+测试集群配置
+测试 ssh 密钥对认证登陆
+• 在管理节点上 通过 master_check_ssh 做 ssh 检查
+/usr/local/bin/masterha_check_ssh  --conf= 管理节点主机主配置文件
+/usr/local/bin/masterha_check_ssh --conf=/etc/mha_manager/app1.cnf
+测试主从同步状态
+• 在管理节点上监控复制环境: 通过 masterha_check_repl 脚本查看整个集群的状态
+/usr/local/bin/masterha_check_repl  --conf= 管理节点主机主配置文件
+/usr/local/bin/masterha_check_repl  --conf=/etc/masterha/app1.cnf
+启动 MHA_Manager
+• 开启 MHA Manager 监控
+– masterha_manager // 启动命令
+– --remove_dead_master_conf // 不在 app1.cnf 文件里删除宕机的主库的信息
+– --ignore_last_failover // 忽略 .health 文件
+masterha_manager  --conf=/etc/mha/app1.cnf --remove_dead_master_conf --
+ignore_last_failover
+• 查看状态 : masterha_check_status
+masterha_check_status --conf=/etc/mha/app1.cnf
+• 停止服务 : masterha_stop
+masterha_stop --conf=/etc/mha/app1.cnf
+测试高可用配置
+修改故障切换脚本
+• 在脚本里添加如下行
+查看 VIP 地址
+• 当主库服务器宕机后,在备用 1 主库数据库服务器上查看 VIP 地址
+ip addr show | grep vip 地址
+•手动配置 vip 地址
+ifconfig ethX:1 x.x.x.x/32
+手动把坏掉的数据库服务器重新加入集群
+# systemctl  start  mysqld
+mysql>change master to  master_host="当前使用的主库",master_user="当前使用的主从用户名",master_password="密码",master_log_file="当前binlog志",master_log_pos="当前偏移量";
+mysql>start  slave;
+添加成功后使用binlog日志还原,也可以使用增量备份还原。
+在管理主机上把新添加的服务器添加到/etc/mha_manager/app1.cnf
+[server1]
+hostname=192.168.4.52
+port=3306
+candidate_master=1 // 设置为候选 master
+启动管理服务
+##############################################3
+配置步骤总结
+• 配置步骤
+– ( 1 )配置 ssh 密钥认证登陆
+– ( 2 )配置 MySQL 一主多从
+– ( 3 )安装软件包
+– ( 4 )配置管理节点
+– ( 5 )启动管理服务
+– ( 6 )测试配置
+– ( 7 )测试故障转移
+######################################################
+MySQL 视图
+视图介绍
+• 什么是视图 (View)
+– 虚拟表
+– 内容与真实的表相似,包含一系列带有名称的列和行数据。
+– 视图并不在数据库中以存储的数据的形式存在。
+– 行和列的数据来自定义视图时查询所引用的基表,并且在具体引用视图时动态生成。
+– 更新视图的数据,就是更新基表的数据
+– 更新基表数据,视图的数据也会跟着改变
+视图优点
+• 简单
+– 使用视图的用户完全不需要关心视图中的数据是通过什么查询得到的。
+– 视图中的数据对用户来说已经是过滤好的符合条件的结果集。
+• 安全
+– 用户只能看到视图中的数据。
+• 数据独立
+– 一旦视图的结构确定了,可以屏蔽表结构变化对用户的影响。
+使用视图的限制
+• 不能在视图上创建索引
+• 在视图的 FROM 子句中不能使用子查询
+• 以下情形中的视图是不可更新的
+– 包含以下关键字的 SQL 语句:聚合函数 (SUM 、 MIN
+、 MAX 、 COUNT 等 ) 、 DISTINCT 、 GROUP BY
+、 HAVING 、 UNION 或 UNION ALL
+– 常量视图
+– JOIN
+– FROM 一个不能更新的视图
+– WHERE 子句的子查询引用了 FROM 子句中的表
+– 使用了临时表,视图是不可更新
+视图的基本使用
+创建视图
+• 语法格式
+– create view 视图名称 as SQL 查询;
+– create view 视图名称 (字段名列表) as SQL 查询;
+mysql> create view t11 as select * from t1;
+mysql>create  view  v1(vname,vuid,vshell) as  select name,uid,shell   from t1;
+查看视图
+• 查看当前库下所有表的状态信息
+– show table status;
+– show table status where comment="view"\G;
+• 查看创建视图的具体命令
+– show create view 视图名;
+使用视图
+• 查询记录
+– Select 字段名列表
+from 视图名 where 条件;
+• 插入记录
+– Insert into 视图名 ( 字段名列表 ) values( 字段值列表);
+• 更新记录
+– Update 视图名 set 字段名 = 值 where 条件;
+• 删除记录
+– Delete from 视图名 where 条件;
+注意:对视图操作即是对基本操作,反之亦然!!!
+删除视图
+• 语法格式
+– drop view 视图名;
+创建视图完全格式
+• 命令格式
+– CREATE
+[OR REPLACE]
+[ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}]
+[DEFINER = { user | CURRENT_USER }]
+[SQL SECURITY { DEFINER | INVOKER }]
+VIEW view_name [(column_list)]
+AS select_statement
+[WITH [CASCADED | LOCAL] CHECK OPTION]
+设置字段别名
+• 命令格式
+– 视图中的字段名不可以重复 所以要定义别名
+Create view 视图名  as  select 表别名 . 源字段名 as 字段别名
+from 源表名 表别名 left join 源表名 表别名  on 条件;
+关联查询建的视图 默认不允许修改视图字段的值
+重要选项说明
+OR REPLACE
+• 语法格式
+– 创建时,若视图已存在,会替换已有的视图
+– Create or replace view 视图名 as select 查询
+ALGORITHM
+• 定义处理视图的方式
+– ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}
+• MERAGE (替换方式)
+– 视图名直接使用视图的公式替换掉,把视图公式合并到了 select 中。
+• TEMPTABLE (具体化方式)
+– 先得到视图的执行结果,该结果形成一个中间结果暂时存在
+内存中,之后,外面的 select 语句就调用了这些中间结果。
+• UNDEFINED (未定义)
+– ALGORITHM 选项的值是 UNDEFINED 表示使用的是 MERAGE 替换方式。
+WITH CHECK OPTION
+• 当视图是根据另一个视图定义时 , 对视图更新 / 删除 / 插入
+– LOCAL 和 CASCADED 关键字决定了检查的范围。
+– LOCAL 仅检查当前视图的限制。
+– CASCADED 同时要满足基表的限制。
+mysql> create view v1 ( 默认值 )  as    select * from a where uid < 10 with check option;
+######################################33
+MySQL 存储过程
+• 什么存储过程
+– 数据库中保存的一系列 sql 命令的集合
+– 编写存储过程时,可以使用变量、条件判断、流程控制等
+– 存储过程,就是 MySQL 中的脚本
+存储过程优点
+• 存储过程优点
+– 提高性能
+– 可减轻网络负担
+– 可以防止对表的直接访问
+– 避免重复的 sql 操作
+创建存储过程
+delimiter //
+create procedure ()
+begin
+功能代码
+.....
+end
+//
+结束存储过程
+delimiter ;
+查看存储过程 
+• 方法 1
+– mysql> show procedure status;
+• 方法 2
+– mysql> select db,name,type from mysql.proc where name=“ 存储过程名 ";
+调用 / 删除存储过程
+调用存储过程
+– Call  存储过程名 ();
+存储过程没有参数时, () 可以省略有参数时,在调用存储过程时,必须传参。
+• 删除存储过程
+– drop procedure 存储过程名;
+参数类型
+MySQL 存储过程,共有三种参数类型 IN,OUT,INOUT
+Create procedure 名称 (类型 参数名 数据类型 ,类型 参数名 数据类型)关键字
+in 输入参数                    作用是给存储过程传值,必须在调用存储过程时赋值,在   存储过程中该参数的值不允许修改;默认类型是 in
+out 输出参数                     该值可在存储过程内部被改变,并可返回
+inout 输入 / 输出参数           调用时指定,并且可被改变和返回
+注意:此三中类型的变量在存储过程中调用时不需要加 @ 符号 !!!
+会话变量      会话变量和全局变量叫系统变量 使用 set 命令定义;
+全局变量      全局变量的修改会影响到整个服务器,但是对会
+              话变量的修改,只会影响到当前的会话。
+用户变量      在客户端连接到数据库服务的整个过程中都是有
+               效的。当当前连接断开后所有用户变量失效。
+               定义 set  @ 变量名 = 值;
+               输出 select @ 变量名;
+局部变量      存储过程中的 begin/end 。其有效范围仅限于该
+               语句块中,语句块执行完毕后,变量失效。
+            declare 专门用来定义局部变量。
+注意:局部变量 和 参数变量 调用时 变量名前不需要加 @
+mysql> show global variables; // 查看全局变量
+mysql> show session variables; // 查看会话变量
+mysql> set session sort_buffer_size = 40000; // 设置会话变量
+mysql> show session variables like “sort_buffer_size”; // 查看会话变量
+Mysql> show global variables like “% 关键字 %”; // 查看全局变量
+mysql> set @y = 3; // 用户自定义变量,直接赋值
+mysql> select max(uid) into @y from user; // 使用 sql 命令查询结果赋值
+算数运算
+• 算数运算符号
++      加法运算 SET @var1=2+2;
+-       减法运算  SET @var2=3-2;
+*       乘法运算 SET @var3=3*2 ;
+/       除法运算 SET @var4=10/3; 3.333333333
+DIV   整除运算 SET @var5=10
+%       取模     SET @var6=10%3 ;
+条件判断
+• 数值的比较
+=                        等于
+> 、 >=                 大于、大于或等于
+< 、 <=                 小于、小于或等于
+!=                        不等于
+BETWEEN .. AND ..    在 .. 与 .. 之间
+条件判断
+• 逻辑比较、范围、空、非空、模糊、正则
+OR 、 AND 、 !     逻辑或、逻辑与、逻辑非
+IN .. 、 NOT IN .. 在 .. 范围内、不在 .. 范围内
+IS NULL            字段的值为空
+IS NOT NULL        字段的值不为空
+LIKE               模糊匹配
+REGEXP             正则匹配
+流程控制
+顺序结构
+当“条件成立”时执行命令序列
+• 否则,不执行任何操作
+if 条件测试 then
+代码......
+end if ;
+当“条件成立”时执行代码 1
+• 否则,执行代码 2
+if 条件测试 then
+代码 1 ....
+else
+代码 2.....
+end if;
+循环结构
+• 条件式循环
+– 反复测试条件,
+– 只要成立就执行命令序列
+while 条件判断 do
+循环体
+.......
+end while ;
+• 条件式循环
+– 无循环条件
+loop
+循环体
+......
+end loop ;
+• 条件式循环
+– until 条件判断,不成立时结束循
+repeat
+        循环体
+      until 条件判断
+end repeat ;
+控制语句
+• 循环结构控制语句 , 控制循环结构的执行。
+– LEAVE 标签名 // 跳出循环
+– ITERATE 标签名 / 放弃本次循环,执行下一次循环
+begin 
+标签名:loop
+  .....
+  leave 标签名
+end loop;
+end
+#######################################
+分库分表概述
+分库分表
+• 什么是分库分表
+– 通过某种特定条件,将存放在一个数据库 ( 主机 ) 中的数据,分散存放到多个数据库 ( 主机 ) 中。
+– 已达到分散单台设备负载的效果,即分库分表
+– 数据的切分根据其切分规则的类型,分为 2 种切分模式
+– 垂直分割 ( 纵向 ) 和 水平分割 ( 横向 )
+垂直分割
+• 纵向切分
+– 把单一的表,拆分成多个表,并分散到不同的数据库( 主机 ) 上。
+– 一个数据库由多个表构成,每个表对应不同的业务,可以按照业务对表进行分类,将其分布到不同的数据库 ( 主机 ) 上,实现专库专用,让不同的库 ( 主机 ) 分担不同的业务。
+水平分割
+• 横向切分
+– 按照表中某个字段的某种规则,把向表中写入的记录分散到多个库 ( 主机 ) 中。
+– 简单来说,就是按照数据行切分,将表中的某些行存储到指定的数据库 ( 主机 ) 中。
+软件介绍
+• Mycat 是基于 Java 的分布式数据库系统中间层,为高并发下的分布式提供解决方案
+– 支持 JDBC 形式连接
+– 支持 MySQL 、 Oracle 、 Sqlserver 、 Mongodb 等
+– 提供数据读写分离服务
+– 可以实现数据库服务器的高可用
+– 提供数据分片服务
+– 基于阿里巴巴 Cobar 进行研发的开源软件
+– 适合数据大量写入数据的存储需求
+分片规则
+• mycat 服务提供 10 种分片规则。
+– 1 枚举法 sharding-by-intfile
+– 2 固定分片 rule1
+– 3 范围约定 auto-sharding-long
+– 4 求模法 mod-long
+– 5 日期列分区法 sharding-by-date
+– 6 通配取模 sharding-by-pattern
+– 7ASCII 码求模通配 sharding-by-prefixpattern
+– 8 编程指定 sharding-by-substring
+– 9 字符串拆分 hash 解析 sharding-by-stringhash
+– 10 一致性 hash sharding-by-murmur
+工作过程
+• 当 Mycat 收到一个 SQL 时
+– 会先解析这个 SQL 查找涉及到的表,然后看此表的定义
+– 如果有分片规则,则获取到 SQL 里分片字段的值,并匹配分片函数,得到该 QL 对应的分片列表
+– 然后将 SQL 发往这些分片去执行,最后收集和处理所有分片返回的结果数据,并输出到客户端
+拓扑结构
+• 数据分片拓扑结构
+                                          hostA
+                              hostB
+                      hostC                  hostD
+• 安装 JDK
+rpm -qa | grep -i jdk # 安装系统自带的即可
+• 安装 mycat 服务软件包
+tar -zxf Mycat-server-1.4-beta-20150604171601-linux.tar.gz # 免安装,解压后即可使用
+mv mycat/ /usr/local/
+ls /usr/local/mycat/
+   bin catlet conf lib logs version.txt
+修改配置文件
+• 目录结构说明
+– bin          mycat 命令 如 启动 停止 等
+– catlet       扩展功能
+– conf         配置文件
+– lib          mycat 使用的 jar 包 mycat 是 java 开发的
+– log          mycat 启动日志和运行日志
+– wrapper.log  mycat 服务启动日志 ,启动有问题可以看这个日志的内容
+– mycat.log    记录 sql 脚本执行后的具体报错内容
+• 重要配置文件说明
+– server.xml        设置连接 mycat 服务的账号 、密码等
+– schema.xml        配置 mycat 使用的真实数据库和表
+– rule.xml          定义 mycat 分片规则
+• 配置标签说明
+– <user>.......</user> 定义连接 mycat 服务时使用的
+用户和密码及逻辑库的名字
+– <datanode>......</datanode> 指定数据节点(物理
+库的主机名和存储分片数据的数据库名)
+– <datahost>......</datahost> 指定数据库服务器的 IP
+地址 及连接数据库时使用的授权用户名及密码
+• 修改配置文件 /usr/local/mycat/conf/server.xml
+            <user name="admin">   # 连接 mycat 服务时使用的用户名
+ 35                 <property name="password">test</property>
+                             # 使用test 用户连接 mycat 用户时使用的密码
+ 36                 <property name="schemas">TESTDB</property>
+                            # 连接上 mycat 服务后,可以看到的库名多个时,使用逗号分隔 (是逻辑上的库名)
+ 37         </user>
+ 39         <user name="webuser">
+ 40                 <property name="password">user</property>
+ 41                 <property name="schemas">TESTDB</property>
+ 42                 <property name="readOnly">true</property>
+                          # 定义只读权限,使用定义的 user 用户连接 mycat 服务后只有读记录的权限
+ 43         </user>
+          /usr/local/mycat/conf/schema.xml
+<table name="travelrecord" dataNode="dn1,dn2" rule="auto-sharding-long" />
+             <table name="company" primaryKey="ID" type="global" dataNode="dn1,dn2" />
+                <table name="goods" primaryKey="ID" type="global" dataNode="dn1,dn2" />
+                <table name="hotnews" primaryKey="ID" dataNode="dn1,dn2"
+                        rule="mod-long" />
+                <table name="employee" primaryKey="ID" dataNode="dn1,dn2"
+                        rule="sharding-by-intfile" />
+                <table name="customer" primaryKey="ID" dataNode="dn1,dn2"
+                        rule="sharding-by-intfile">
+                        <childTable name="orders" primaryKey="ID" joinKey="customer_id"
+                                parentKey="id">
+                                <childTable name="order_items" joinKey="order_id"
+                                        parentKey="id" />
+                        </childTable>
+           <childTable name="customer_addr" primaryKey="ID"joinKey="customer_id"
+                                parentKey="id" />
+                </table>
+        </schema>
+        <dataNode name="dn1" dataHost="c1" database="db1" />
+        <dataNode name="dn2" dataHost="c2" database="db2" />
+<dataHost name="c1" maxCon="1000" minCon="10" balance="0"
+                writeType="0" dbType="mysql" dbDriver="native" switchType="1"  slaveThreshold="100">
+           <heartbeat>select user()</heartbeat>
+        <writeHost host="hostM1" url="192.168.4.52:3306" user="yaya"password="123456">
+                </writeHost>
+        </dataHost>
+        <dataHost name="c2" maxCon="1000" minCon="10" balance="0"
+                writeType="0" dbType="mysql" dbDriver="native" switchType="1"  slaveThreshold="100">
+                <heartbeat>select user()</heartbeat>
+                <writeHost host="hostM2" url="192.168.4.53:3306" user="yaya"
+                        password="123456">
+                  </writeHost>
+        </dataHost>
+• 修改数据库服务器配置文件
+– 添加对应设置后重启 mysqld 服务
+– 添加授权用户
+Vim /etc/my.cnf
+[mysqld]
+......
+lower_case_table_names = 1 # 表名区分字母大小写
+systemctl restart mysqld
+启动服务
+• 启动服务
+– 指定 java 路径、添加 PATH 路径、启动服务
+测试配置
+查看java 的存在
+which java
+java -version
+启动服务
+/usr/local/mycat/bin/mycat  start
+测试配置
+• 在客户端连接 mycat 服务器
+– mysql –hmycat 服务器 ip 地址 – P 端口 – u 用户 – p密码
+
