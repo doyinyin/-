@@ -1,0 +1,178 @@
+搭建DHCP服务
+DHCP概述及原理
+• Dynamic Host Configuration Protocol
+– 动态主机配置协议,由 IETF(Internet 网络工程师任
+务小组)组织制定,用来简化主机地址分配管理
+• 主要分配以下入网参数
+ – IP地址/子网掩码/广播地址
+  –  默认网关地址、DNS服务器地址
+•  DHCP地址分配的四次会话,通过广播的方式，先到先得
+     一个网络中不能有多台DHCP
+服务器：
+1.安装软件包
+yum -y install dhcp
+2.修改主配置文件
+vim  /etc/dhcp/dhcpd.conf
+末行模式  :r /usr/share/doc/dhcp*/dhcpd.conf.example  
+subnet  192.168.4.0  netmask 255.255.255.0 {
+  range  192.168.4.100   192.168.4.200;
+  option domain-name-servers 192.168.4.7;
+  option routers 192.168.4.254;
+  default-lease-time 600;
+  max-lease-time 7200;
+}
+systemctl restart dhcpd
+什么是PXE网络
+• PXE,Pre-boot eXecution Environment
+– 预启动执行环境,在操作系统之前运行
+– 可用于远程安装
+• 工作模式
+– PXE client 集成在网卡的启动芯片中
+–  当计算机引导时,从网卡芯片中把PXE client调入内存
+执行,获取PXE server配置、显示菜单,根据用户选
+择将远程引导程序下载到本机运行
+• 网络装机服务端需要哪些服务组件?
+  – DHCP服务,分配IP地址、定位引导程序
+  – TFTP服务,提供引导程序下载
+  – HTTP服务,提供yum安装源
+网络装机服务器虚拟机A
+一、dhcp配置，指定next-server下一个服务器
+修改配置文件
+ vim /etc/dhcp/dhcpd.conf
+.......
+  next-server 192.168.4.7;
+  filename   "pxelinux.0";      #指定网卡引导文件名
+}
+重起dhcpd服务
+systemctl restart dhcpd
+ pxelinux.0：安装说明书,二进制文件，安装一个软件自动生成
+ pxelinux.0-----》读取菜单文件
+          /var/lib/tftpboot/pxelinux.cfg/default
+  netstat -untlp | grep dhcp
+二、搭建tftp服务，传输引导文件
+  tftp:简单的文件传输协议  端口：69
+    默认共享路径：/var/lib/tftpboot
+安装软件包tftp-server    xinetd
+vim /etc/xinetd.d/tftp
+disable =  no   //默认为yes时会禁用tftp服务 需修改为no。默认共享路径为/var/lib/tftpboot。
+重起tftp服务
+systemctl restart tftp
+systemctl enable tftp
+部署pxelinux.0文件
+ #查询仓库中软件生成pxelinux.0
+#  yum  provides  */pxelinux.0  
+#  yum -y install syslinux
+#  rpm -ql syslinux      #查看软件包安装清单
+#  rpm -ql syslinux | grep pxelinux.0 
+# cp /usr/share/syslinux/pxelinux.0  /var/lib/tftpboot/
+# ls /var/lib/tftpboot/
+部署菜单文件
+# mkdir  /var/lib/tftpboot/pxelinux.cfg
+# ls  /var/lib/tftpboot/
+# mount  /dev/cdrom   /mnt/
+# ls  /mnt/isolinux/
+# cp /mnt/isolinux/isolinux.cfg /var/lib/tftpboot/pxelinux.cfg/default
+# ls -l  /var/lib/tftpboot/pxelinux.cfg/default
+# chmod 644 /var/lib/tftpboot/pxelinux.cfg/default
+# ls -l  /var/lib/tftpboot/pxelinux.cfg/default
+ 部署启动内核  启动驱动程序  
+   vmlinuz 启动内核 
+   initrd.img  启动驱动程序  
+# cp /mnt/isolinux/vmlinuz /mnt/isolinux/initrd.img   /var/lib/tftpboot/
+# ls /var/lib/tftpboot/
+部署  图形的模块    背景图片
+   vesamenu.c32 图形的模块   
+   splash.png  背景图片
+cp /mnt/isolinux/vesamenu.c32 /mnt/isolinux/splash.png /var/lib/tftpboot/
+ls /var/lib/tftpboot/
+ initrd.img  pxelinux.cfg  vesamenu.c32
+ pxelinux.0  splash.png    vmlinuz
+修改菜单文件内容
+ # vim  /var/lib/tftpboot/pxelinux.cfg/default
+  default vesamenu.c32  #加载图形的模块
+  timeout 60            #读秒的时间
+    .......
+  menu background splash.png      #指定背景图片
+  menu title PXE Server NSD1803   #指定标题
+    .......
+ label linux
+   menu label Install RHEL7   #显示选项内容
+   kernel vmlinuz             #指定启动内核
+   append initrd=initrd.img   #指定启动驱动程序
+###############################################
+三、搭建Web服务，共享光盘所有内容
+1.安装软件包
+yum -y install httpd
+2.创建目录
+mkdir /var/www/html/rhel7
+ls /var/www/html/rhel7
+mount /dev/cdrom  /var/www/html/rhel7
+ls /var/www/html/rhel7
+systemctl restart httpd
+systemctl enable httpd
+3.测试
+firefox 192.168.4.7/rhel7
+四、部署应答文件，无人值守安装
+1.图形生成应答文件的工具  system-config-kickstart
+   # yum  -y install system-config-kickstart
+2.修改Yum仓库标识
+vim /etc/yum.repos.d/rhel7.repo 
+   [development]
+system-config-kickstart
+      查看软件包是否可以选择
+3.查看应答文件
+ls /root/ks.cfg 
+4.利用Web服务，共享应答文件
+cp /root/ks.cfg  /var/www/html
+ls /var/www/html
+5.修改菜单文件指定应答文件
+ # vim /var/lib/tftpboot/pxelinux.cfg/default
+........
+label linux
+  menu label Install RHEL7
+  menu  default                 #读秒之后默认的选择
+  kernel vmlinuz
+  append initrd=initrd.img ks=http://192.168.4.7/ks.cfg
+kickstart配置
+   基础设置  语言：中文
+             时区：asia/shanghai
+             使用utc时钟
+             root密码  加密
+             安装后重起
+   安装方法  http  /rhel7
+引导装载程序   安装
+分区  清除主引导记录
+      删除所有现分区
+      初始化磁盘分区
+     根据公司情况分区
+网络配置 添加eth0
+防火墙  禁用
+软件包选择   系统 基本
+预安装脚本   
+保存  /root/
+##################################### 
+总结：
+     dhcp----》IP、next-server、pxelinux.0
+     tftp----》pxelinux.0
+     pxelinux.0----》default
+     default----》vesamenu.c32 、vmlinuz、initrd.img 
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
